@@ -1,181 +1,180 @@
-#!/bin/bash
-#
-# github-connect.sh
-# First-time setup tool to connect your Bash console to your GitHub account.
-# - Checks for git and gh (GitHub CLI)
-# - Logs into GitHub
-# - Sets up SSH keys
-# - Uploads SSH key to GitHub
-# - Optionally creates and links a repo for the current folder
+#!/usr/bin/env bash
+
+###############################################
+# GitHub Connect - First Time Setup & Dashboard
+###############################################
 
 set -e
 
-# ---------- Helpers ----------
+# Colors
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
 
-print_header() {
-    echo "========================================"
-    echo "  GitHub Connect - First Time Setup"
-    echo "========================================"
-    echo
-}
+echo -e "${GREEN}========================================"
+echo -e "  GitHub Connect - First Time Setup"
+echo -e "========================================${RESET}"
 
-require_command() {
-    local cmd="$1"
-    local name="$2"
-
-    if ! command -v "$cmd" &> /dev/null; then
-        echo "❌ $name ($cmd) is not installed."
-        echo "   Please install $name and run this script again."
-        exit 1
-    else
-        echo "✅ $name found: $cmd"
-    fi
-}
-
-# ---------- Start ----------
-
-print_header
+###############################################
+# Check required tools
+###############################################
 
 echo "🔧 Checking required tools..."
-require_command git "Git"
-require_command gh "GitHub CLI"
+
+if ! command -v git &> /dev/null; then
+    echo -e "${RED}❌ Git not found. Install Git first.${RESET}"
+    exit 1
+fi
+echo "✅ Git found: git"
+
+if ! command -v gh &> /dev/null; then
+    echo -e "${RED}❌ GitHub CLI not found. Install gh first.${RESET}"
+    exit 1
+fi
+echo "✅ GitHub CLI found: gh"
+
+###############################################
+# GitHub Authentication
+###############################################
+
 echo
-
-# ---------- GitHub login ----------
-
 echo "🔐 GitHub authentication"
 echo "   This will open a browser window for login if needed."
 echo
 
-gh auth status &> /dev/null && AUTH_OK=true || AUTH_OK=false
+AUTH_STATUS=$(gh auth status 2>&1 || true)
 
-if [ "$AUTH_OK" = true ]; then
-    echo "✅ Already authenticated with GitHub."
+if [[ "$AUTH_STATUS" == *"Logged in"* ]]; then
+    echo "✅ Already authenticated."
 else
     echo "⚠️ Not authenticated. Starting 'gh auth login'..."
     gh auth login
-    echo "✅ Authentication complete."
 fi
 
-echo
 echo "🔍 Current auth status:"
 gh auth status
+
+###############################################
+# SSH Key Setup
+###############################################
+
 echo
-
-# ---------- SSH key setup ----------
-
-SSH_KEY="$HOME/.ssh/id_ed25519"
-SSH_PUB="$HOME/.ssh/id_ed25519.pub"
-
 echo "🔑 SSH key setup"
 
-if [ -f "$SSH_KEY" ] && [ -f "$SSH_PUB" ]; then
+SSH_KEY="$HOME/.ssh/id_ed25519"
+
+if [[ -f "$SSH_KEY" ]]; then
     echo "✅ SSH key already exists at: $SSH_KEY"
 else
-    echo "⚠️ No SSH key found. Generating a new one via GitHub CLI..."
-    gh ssh-key generate
-    echo "✅ SSH key generated."
+    echo "⚠️ No SSH key found. Generating new key..."
+    ssh-keygen -t ed25519 -C "github" -f "$SSH_KEY"
+    gh ssh-key add "$SSH_KEY.pub" --title "gc"
+    echo "✓ Uploaded SSH key to GitHub"
 fi
 
-echo
-echo "📤 Uploading SSH public key to GitHub (if not already added)..."
-
-# Try to add the key; if it fails because it's already added, just continue
-if gh ssh-key add "$SSH_PUB" --title "github-connect-$(hostname)" 2>&1 | grep -qi "already exists"; then
-    echo "ℹ️ SSH key already registered with GitHub."
-else
-    echo "✅ SSH key uploaded to GitHub."
-fi
+###############################################
+# Git Configuration
+###############################################
 
 echo
-
-# ---------- Git config basics ----------
-
 echo "⚙️ Checking basic Git configuration"
 
-GIT_NAME=$(git config --global user.name || true)
-GIT_EMAIL=$(git config --global user.email || true)
-
-if [ -z "$GIT_NAME" ] || [ -z "$GIT_EMAIL" ]; then
-    echo "⚠️ Git user.name and/or user.email not set."
-    echo "   Let's configure them now."
-
-    read -p "   Your name (for commits): " NAME_INPUT
-    read -p "   Your email (for commits): " EMAIL_INPUT
-
-    if [ -n "$NAME_INPUT" ]; then
-        git config --global user.name "$NAME_INPUT"
-        echo "   ✅ Set user.name to '$NAME_INPUT'"
-    fi
-
-    if [ -n "$EMAIL_INPUT" ]; then
-        git config --global user.email "$EMAIL_INPUT"
-        echo "   ✅ Set user.email to '$EMAIL_INPUT'"
-    fi
-else
-    echo "✅ Git user.name:  $GIT_NAME"
-    echo "✅ Git user.email: $GIT_EMAIL"
+if [[ -z "$(git config --global user.name)" ]]; then
+    read -p "   Your name (for commits): " NAME
+    git config --global user.name "$NAME"
+    echo "   ✅ Set user.name to '$NAME'"
 fi
 
-echo
-
-# ---------- Repo linking ----------
-
-echo "📦 Repository setup for current folder"
-echo "   Current directory: $PWD"
-echo
-
-# Check if this folder is already a git repo
-if git rev-parse --is-inside-work-tree &> /dev/null; then
-    echo "✅ This folder is already a Git repository."
-
-    # Check if remote origin exists
-    if git remote get-url origin &> /dev/null; then
-        echo "✅ Remote 'origin' already configured:"
-        git remote get-url origin
-    else
-        echo "⚠️ No 'origin' remote configured."
-        read -p "   Do you want to create/link a GitHub repo for this folder? (y/n): " CREATE_REMOTE
-        if [ "$CREATE_REMOTE" = "y" ]; then
-            REPO_NAME=$(basename "$PWD")
-            echo "   Creating GitHub repo: $REPO_NAME"
-            gh repo create "$REPO_NAME" --source=. --remote=origin --push
-            echo "   ✅ GitHub repo created and linked as 'origin'."
-        else
-            echo "   ℹ️ Skipping remote setup."
-        fi
-    fi
-else
-    echo "⚠️ This folder is not yet a Git repository."
-    read -p "   Initialize Git and create a GitHub repo for this folder? (y/n): " INIT_AND_CREATE
-
-    if [ "$INIT_AND_CREATE" = "y" ]; then
-        echo "   Initializing Git..."
-        git init
-
-        echo "   Adding all files and making initial commit..."
-        git add .
-        git commit -m "Initial commit"
-
-        REPO_NAME=$(basename "$PWD")
-        echo "   Creating GitHub repo: $REPO_NAME"
-        gh repo create "$REPO_NAME" --source=. --remote=origin --push
-
-        echo "   ✅ Repo initialized, committed, and pushed to GitHub."
-    else
-        echo "   ℹ️ Skipping repo initialization."
-    fi
+if [[ -z "$(git config --global user.email)" ]]; then
+    read -p "   Your email (for commits): " EMAIL
+    git config --global user.email "$EMAIL"
+    echo "   ✅ Set user.email to '$EMAIL'"
 fi
 
+###############################################
+# Repo Linker Function
+###############################################
+
+gc_link_repo() {
+    echo
+    echo "Fetching your GitHub repositories..."
+    REPOS=$(gh repo list --limit 200 --json name --jq '.[].name')
+
+    if [ -z "$REPOS" ]; then
+        echo "No repositories found."
+        return
+    fi
+
+    echo
+    echo "Select a GitHub repository to link:"
+    echo
+
+    i=1
+    declare -A REPO_MAP
+
+    for repo in $REPOS; do
+        echo "$i) $repo"
+        REPO_MAP[$i]=$repo
+        ((i++))
+    done
+
+    echo
+    read -p "Enter number: " CHOICE
+
+    SELECTED=${REPO_MAP[$CHOICE]}
+
+    if [ -z "$SELECTED" ]; then
+        echo "Invalid selection."
+        return
+    fi
+
+    echo "You selected: $SELECTED"
+    echo
+
+    # If folder is empty → clone
+    if [ -z "$(ls -A .)" ]; then
+        echo "Folder is empty. Cloning repo..."
+        gh repo clone "$SELECTED" .
+        echo "Repo cloned."
+        return
+    fi
+
+    # If folder has files → link as remote
+    echo "Folder has files. Linking repo as remote origin..."
+    git init
+    USERNAME=$(gh api user --jq .login)
+    git remote add origin "git@github.com:$USERNAME/$SELECTED.git"
+    echo "Linked remote origin."
+}
+
+###############################################
+# Dashboard Loop
+###############################################
+
 echo
-echo "✨ All done!"
-echo "   - Git and GitHub CLI are configured"
-echo "   - GitHub authentication is active"
-echo "   - SSH keys are set up and registered"
-echo "   - This folder is optionally linked to a GitHub repo"
-echo
-echo "You can now use:"
-echo "   git status"
-echo "   git add / commit / push"
-echo "   gh repo clone / gh pr create / etc."
-echo
+echo -e "${GREEN}========================================"
+echo -e "        GitConnect Dashboard"
+echo -e "========================================${RESET}"
+
+while true; do
+    echo
+    echo "Available commands:"
+    echo "  gc link repo   - Link or clone a GitHub repo"
+    echo "  exit           - Quit dashboard"
+    echo
+    read -p "gitconnect> " CMD
+
+    case "$CMD" in
+        "gc link repo")
+            gc_link_repo
+            ;;
+        "exit")
+            echo "Goodbye."
+            exit 0
+            ;;
+        *)
+            echo "Unknown command: $CMD"
+            ;;
+    esac
+done
