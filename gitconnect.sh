@@ -1,98 +1,77 @@
-#!/bin/bash
+gc_push_file() {
+    FILE="$1"
+    REMOVE_AFTER="$2"   # this will be "-r" if used
 
-STATE_FILE="$HOME/.gitconnect-setup-complete"
-
-# -------------------------------
-# GitHub Dashboard Function
-# -------------------------------
-github_dashboard() {
-    clear
-    echo "========================================"
-    echo "        GitHub Console Dashboard"
-    echo "========================================"
-    echo
-
-    # GitHub auth status
-    if gh auth status &>/dev/null; then
-        GH_STATUS="connected"
-    else
-        GH_STATUS="not logged in"
+    if [ -z "$FILE" ]; then
+        echo "Usage: gc push file <filename> [-r]"
+        return
     fi
 
-    # Repo + branch
-    if git rev-parse --is-inside-work-tree &>/dev/null; then
-        REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
-        BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
-    else
-        REPO_NAME="—"
-        BRANCH_NAME="—"
+    if [ ! -f "$FILE" ]; then
+        echo "File not found: $FILE"
+        return
     fi
 
-    echo "[GitHub: $GH_STATUS] [Repo: $REPO_NAME] [Branch: $BRANCH_NAME]"
+    if [ ! -f "$HOME/.gitconnect-current-repo" ]; then
+        echo "No repo connected. Use 'gc link repo' first."
+        return
+    fi
+
+    CONNECTED_REPO=$(cat "$HOME/.gitconnect-current-repo")
+
+    echo "Fetching directory list from $CONNECTED_REPO..."
+    DIRS=$(gh api repos/$CONNECTED_REPO/contents --jq '.[] | select(.type=="dir") | .path')
+
     echo
-    echo "Type 'exit' to leave dashboard mode."
-    echo
-}
+    echo "Select destination directory:"
+    echo "1) / (root)"
 
-# -------------------------------
-# Interactive Dashboard Loop
-# -------------------------------
-dashboard_mode() {
-    while true; do
-        github_dashboard
-        read -p "gitconnect> " CMD
+    i=2
+    declare -A DIR_MAP
+    DIR_MAP[1]="/"
 
-        if [ "$CMD" = "exit" ]; then
-            echo "Leaving GitHub dashboard."
-            exit 0
-        fi
-
-        # Run any command the user types
-        eval "$CMD"
+    for dir in $DIRS; do
+        echo "$i) $dir/"
+        DIR_MAP[$i]="$dir"
+        ((i++))
     done
+
+    echo "$i) Create new directory"
+    NEW_OPTION=$i
+
+    echo
+    read -p "Enter number: " CHOICE
+
+    if [ "$CHOICE" = "$NEW_OPTION" ]; then
+        read -p "Enter new directory name: " NEW_DIR
+        DEST="$NEW_DIR"
+    else
+        DEST=${DIR_MAP[$CHOICE]}
+    fi
+
+    if [ -z "$DEST" ]; then
+        echo "Invalid selection."
+        return
+    fi
+
+    echo "Uploading $FILE to $CONNECTED_REPO at $DEST..."
+
+    BASE64_CONTENT=$(base64 < "$FILE")
+
+    gh api \
+        -X PUT \
+        repos/$CONNECTED_REPO/contents/$DEST/$FILE \
+        -f message="Add $FILE" \
+        -f content="$BASE64_CONTENT"
+
+    echo "File uploaded successfully."
+
+    # -----------------------------
+    # REMOVE LOCAL FILE IF "-r" USED
+    # -----------------------------
+    if [ "$REMOVE_AFTER" = "-r" ]; then
+        echo "Removing local file: $FILE"
+        rm "$FILE"
+        echo "Local file removed."
+    fi
 }
-
-# -------------------------------
-# First-Time Setup
-# -------------------------------
-first_time_setup() {
-    echo "🔧 Checking for Git..."
-    command -v git >/dev/null || { echo "Git missing"; exit 1; }
-
-    echo "🔧 Checking for GitHub CLI..."
-    command -v gh >/dev/null || { echo "GitHub CLI missing"; exit 1; }
-
-    echo "🔐 Logging into GitHub..."
-    gh auth login
-
-    echo "🔑 Checking SSH key..."
-    if [ ! -f ~/.ssh/id_ed25519 ]; then
-        gh ssh-key generate
-    fi
-
-    echo "📤 Uploading SSH key..."
-    gh ssh-key add ~/.ssh/id_ed25519.pub || true
-
-    echo "⚙️ Setting Git identity..."
-    if ! git config --global user.name >/dev/null; then
-        read -p "Your name: " NAME
-        git config --global user.name "$NAME"
-    fi
-
-    if ! git config --global user.email >/dev/null; then
-        read -p "Your email: " EMAIL
-        git config --global user.email "$EMAIL"
-    fi
-
-    echo "✨ Setup complete!"
-    touch "$STATE_FILE"
-}
-
-# -------------------------------
-# Main Logic
-# -------------------------------
-if [ ! -f "$STATE_FILE" ]; then
-    first_time_setup
-fi
-
-dashboard_mode
