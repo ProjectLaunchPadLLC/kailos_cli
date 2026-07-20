@@ -93,6 +93,29 @@ if [[ -z "$(git config --global user.email)" ]]; then
 fi
 
 ###############################################
+# Help Menu
+###############################################
+
+gc_help() {
+    echo
+    echo "========================================"
+    echo "              GitConnect Help"
+    echo "========================================"
+    echo
+    echo "Available commands:"
+    echo
+    echo "  gc help        - Show this help menu"
+    echo "  help           - Same as gc help"
+    echo "  gc link repo   - Link or clone a GitHub repository"
+    echo "  exit           - Quit the dashboard"
+    echo
+    echo "Usage examples:"
+    echo "  gc link repo   → Select a repo from your GitHub account"
+    echo "  help           → Display all available commands"
+    echo
+}
+
+###############################################
 # Repo Linker Function
 ###############################################
 
@@ -160,12 +183,17 @@ echo -e "========================================${RESET}"
 while true; do
     echo
     echo "Available commands:"
-    echo "  gc link repo   - Link or clone a GitHub repo"
-    echo "  exit           - Quit dashboard"
+    echo "  gc help"
+    echo "  help"
+    echo "  gc link repo"
+    echo "  exit"
     echo
     read -p "gitconnect> " CMD
 
     case "$CMD" in
+        "gc help"|"help")
+            gc_help
+            ;;
         "gc link repo")
             gc_link_repo
             ;;
